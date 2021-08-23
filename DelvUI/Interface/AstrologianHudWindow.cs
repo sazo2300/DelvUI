@@ -1,14 +1,21 @@
-﻿using FFXIVClientStructs.FFXIV.Client.Game.Gauge;
-using Dalamud.Game.ClientState.Structs.JobGauge;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Numerics;
 using Dalamud.Plugin;
 using ImGuiNET;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Globalization;
-using System.Linq;
-using Dalamud.Game.ClientState.Actors.Types;
+using Dalamud.Data;
+using Dalamud.Game;
+using Dalamud.Game.ClientState;
+using Dalamud.Game.ClientState.JobGauge;
+using Dalamud.Game.ClientState.JobGauge.Enums;
+using Dalamud.Game.ClientState.JobGauge.Types;
+using Dalamud.Game.ClientState.Objects;
+using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Game.Gui;
+using Dalamud.Interface;
 using DelvUI.Interface.Bars;
 
 namespace DelvUI.Interface
@@ -47,7 +54,29 @@ namespace DelvUI.Interface
         private new Vector2 BarSize { get; set; }
         private Vector2 BarCoords { get; set; }
 
-        public AstrologianHudWindow(DalamudPluginInterface pluginInterface, PluginConfiguration pluginConfiguration) : base(pluginInterface, pluginConfiguration) { }
+        public AstrologianHudWindow(
+            ClientState clientState,
+            DalamudPluginInterface pluginInterface,
+            DataManager dataManager,
+            Framework framework,
+            GameGui gameGui,
+            JobGauges jobGauges,
+            ObjectTable objectTable, 
+            PluginConfiguration pluginConfiguration,
+            TargetManager targetManager,
+            UiBuilder uiBuilder
+        ) : base(
+            clientState,
+            pluginInterface,
+            dataManager,
+            framework,
+            gameGui,
+            jobGauges,
+            objectTable,
+            pluginConfiguration,
+            targetManager,
+            uiBuilder
+        ) { }
 
         protected override void Draw(bool _)
         {
@@ -72,12 +101,13 @@ namespace DelvUI.Interface
             DrawFocusBar();
             DrawCastBar();
         }
-        protected new void DrawOutlinedText(string text, Vector2 pos)
+
+        private new void DrawOutlinedText(string text, Vector2 pos)
         {
             DrawOutlinedText(text, pos, Vector4.One, new Vector4(0f, 0f, 0f, 1f));
         }
 
-        private void DrawDivinationBar()
+        private unsafe void DrawDivinationBar()
         {
             var barWidth = (DivinationWidth / 3);
             BarSize = new Vector2(barWidth, DivinationHeight);
@@ -96,61 +126,58 @@ namespace DelvUI.Interface
 
             drawList.AddRectFilled(cursorPos, cursorPos + BarSize, EmptyColor["gradientRight"]);
             drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
-            if ((PluginInterface.ClientState.LocalPlayer?.ClassJob.Id) != 33)
-            {
+            
+            if (ClientState.LocalPlayer?.ClassJob.Id != 33) {
                 return;
             }
-            unsafe
-            {
-                var gauge = PluginInterface.ClientState.JobGauges.Get<ASTGauge>();
-                var field = typeof(ASTGauge).GetField("seals", BindingFlags.NonPublic | BindingFlags.GetField |
-                                                               BindingFlags.Instance);
-                var result = field.GetValue(gauge);
-                GCHandle hdl = GCHandle.Alloc(result, GCHandleType.Pinned);
-                byte* p = (byte*)hdl.AddrOfPinnedObject();
-                for (int ix = 0; ix < 3; ++ix)
+
+            var gauge = JobGauges.Get<ASTGauge>();
+            var field = typeof(ASTGauge).GetField("seals", BindingFlags.NonPublic | BindingFlags.GetField |
+                                                           BindingFlags.Instance);
+            var result = field?.GetValue(gauge);
+            var hdl = GCHandle.Alloc(result, GCHandleType.Pinned);
+            var p = (byte*)hdl.AddrOfPinnedObject();
+            for (var ix = 0; ix < 3; ++ix) {
+                var seal = *(p + ix);
+                var type = (SealType)seal;
+                switch (type)
                 {
-                    byte seal = *(p + ix);
-                    SealType type = (SealType)seal;
-                    switch (type)
-                    {
-                        case SealType.NONE:
-                            drawList.AddRectFilled(cursorPos, cursorPos + BarSize, EmptyColor["gradientRight"]);
-                            drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
-                            cursorPos = new Vector2(cursorPos.X + barWidth + DivinationBarPad, cursorPos.Y);
-                            break;
-                        case SealType.MOON:
-                            drawList.AddRectFilled(cursorPos, cursorPos + BarSize, SealLunarColor["gradientRight"]);
-                            drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
-                            cursorPos = new Vector2(cursorPos.X + barWidth + DivinationBarPad, cursorPos.Y);
-                            break;
-                        case SealType.SUN:
-                            drawList.AddRectFilled(cursorPos, cursorPos + BarSize, SealSunColor["gradientRight"]);
-                            drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
-                            cursorPos = new Vector2(cursorPos.X + barWidth + DivinationBarPad, cursorPos.Y);
-                            break;
-                        case SealType.CELESTIAL:
-                            drawList.AddRectFilled(cursorPos, cursorPos + BarSize, SealCelestialColor["gradientRight"]);
-                            drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
-                            cursorPos = new Vector2(cursorPos.X + barWidth + DivinationBarPad, cursorPos.Y);
-                            break;
-                    }
-                    if (!gauge.ContainsSeal(SealType.NONE))
-                    {
-                        int sealNumbers = 0;
-                        if (gauge.ContainsSeal(SealType.SUN)) { sealNumbers++; };
-                        if (gauge.ContainsSeal(SealType.MOON)) { sealNumbers++; };
-                        if (gauge.ContainsSeal(SealType.CELESTIAL)) { sealNumbers++; };
-                        var textSealReady = sealNumbers.ToString();
-                        DrawOutlinedText(textSealReady, new Vector2(CenterX + DivinationBarX * 3 + (DivinationWidth / 2f) - (ImGui.CalcTextSize(textSealReady).X / 2f), CenterY + BarCoords.Y - 60 - 2));
-                    }
+                    case SealType.NONE:
+                        drawList.AddRectFilled(cursorPos, cursorPos + BarSize, EmptyColor["gradientRight"]);
+                        drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
+                        cursorPos = new Vector2(cursorPos.X + barWidth + DivinationBarPad, cursorPos.Y);
+                        break;
+                    case SealType.MOON:
+                        drawList.AddRectFilled(cursorPos, cursorPos + BarSize, SealLunarColor["gradientRight"]);
+                        drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
+                        cursorPos = new Vector2(cursorPos.X + barWidth + DivinationBarPad, cursorPos.Y);
+                        break;
+                    case SealType.SUN:
+                        drawList.AddRectFilled(cursorPos, cursorPos + BarSize, SealSunColor["gradientRight"]);
+                        drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
+                        cursorPos = new Vector2(cursorPos.X + barWidth + DivinationBarPad, cursorPos.Y);
+                        break;
+                    case SealType.CELESTIAL:
+                        drawList.AddRectFilled(cursorPos, cursorPos + BarSize, SealCelestialColor["gradientRight"]);
+                        drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
+                        cursorPos = new Vector2(cursorPos.X + barWidth + DivinationBarPad, cursorPos.Y);
+                        break;
+                }
+                    
+                if (!gauge.ContainsSeal(SealType.NONE)) {
+                    var sealNumbers = 0;
+                    if (gauge.ContainsSeal(SealType.SUN)) { sealNumbers++; }
+                    if (gauge.ContainsSeal(SealType.MOON)) { sealNumbers++; }
+                    if (gauge.ContainsSeal(SealType.CELESTIAL)) { sealNumbers++; }
+                    var textSealReady = sealNumbers.ToString();
+                    DrawOutlinedText(textSealReady, new Vector2(CenterX + DivinationBarX * 3 + (DivinationWidth / 2f) - (ImGui.CalcTextSize(textSealReady).X / 2f), CenterY + BarCoords.Y - 60 - 2));
                 }
             }
-
         }
+        
         private void DrawDraw()
         {
-            var gauge = PluginInterface.ClientState.JobGauges.Get<ASTGauge>();
+            var gauge = JobGauges.Get<ASTGauge>();
 
             BarSize = new Vector2(DrawWidth, DrawHeight);
             BarCoords = new Vector2(DrawBarX, DrawBarY);
@@ -160,7 +187,7 @@ namespace DelvUI.Interface
 
             drawList.AddRectFilled(cursorPos, cursorPos + BarSize, EmptyColor["gradientRight"]);
             drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
-            switch (gauge.DrawnCard()) {
+            switch (gauge.DrawnCard) {
                 case CardType.BALANCE:
                     drawList.AddRectFilled(cursorPos, cursorPos + BarSize, SealSunColor["gradientRight"]);
                     drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
@@ -196,7 +223,7 @@ namespace DelvUI.Interface
 
         private void DrawDot()
         {
-            var target = PluginInterface.ClientState.Targets.SoftTarget ?? PluginInterface.ClientState.Targets.CurrentTarget;
+            var actor = TargetManager.SoftTarget ?? TargetManager.Target;
             var drawList = ImGui.GetWindowDrawList();
 
             var xPos = CenterX - XOffset + DotBarX;
@@ -204,23 +231,20 @@ namespace DelvUI.Interface
 
             var cursorPos = new Vector2(xPos, yPos);
 
-            if (!(target is Chara))
-            {
+            if (actor is not BattleChara target) {
                 drawList.AddRectFilled(cursorPos, cursorPos + BarSize, EmptyColor["gradientRight"]);
                 drawList.AddRect(cursorPos, cursorPos + BarSize, 0xFF000000);
                 return;
             }
-            var Dot = target.StatusEffects.FirstOrDefault(o => o.EffectId == 1881 && o.OwnerId == PluginInterface.ClientState.LocalPlayer.ActorId ||
-                                                               o.EffectId == 843 && o.OwnerId == PluginInterface.ClientState.LocalPlayer.ActorId ||
-                                                               o.EffectId == 838 && o.OwnerId == PluginInterface.ClientState.LocalPlayer.ActorId);
-            var DotCooldown = Dot.EffectId == 838 ? 18f : 30f;
-            var DotDuration = Dot.Duration;
 
-
+            Debug.Assert(ClientState.LocalPlayer != null, "ClientState.LocalPlayer != null");
+            var dot = target.StatusList.FirstOrDefault(o => o.StatusId == 1881 && o.SourceID == ClientState.LocalPlayer.ObjectId ||
+                                                               o.StatusId == 843 && o.SourceID == ClientState.LocalPlayer.ObjectId ||
+                                                               o.StatusId == 838 && o.SourceID == ClientState.LocalPlayer.ObjectId);
+            var dotCooldown = dot?.StatusId == 838 ? 18f : 30f;
 
             var builder = BarBuilder.Create(xPos, yPos, DotHeight, DotWidth);
-
-            Bar bar = builder.AddInnerBar(System.Math.Abs(DotDuration), DotCooldown, DotColor)
+            var bar = builder.AddInnerBar(System.Math.Abs(dot?.RemainingTime ?? 0f), dotCooldown, DotColor)
                 .SetTextMode(BarTextMode.EachChunk)
                 .SetText(BarTextPosition.CenterMiddle, BarTextType.Current)
                 .Build();

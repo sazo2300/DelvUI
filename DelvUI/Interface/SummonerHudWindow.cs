@@ -2,7 +2,14 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
-using Dalamud.Game.ClientState.Actors.Types;
+using Dalamud.Data;
+using Dalamud.Game;
+using Dalamud.Game.ClientState;
+using Dalamud.Game.ClientState.JobGauge;
+using Dalamud.Game.ClientState.Objects;
+using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Game.Gui;
+using Dalamud.Interface;
 using Dalamud.Plugin;
 using ImGuiNET;
 
@@ -32,8 +39,29 @@ namespace DelvUI.Interface
         private Dictionary<string, uint> SmnBioColor => PluginConfiguration.JobColorMap[Jobs.SMN * 1000 + 4];
         private Dictionary<string, uint> SmnExpiryColor => PluginConfiguration.JobColorMap[Jobs.SMN * 1000 + 5];
 
-
-        public SummonerHudWindow(DalamudPluginInterface pluginInterface, PluginConfiguration pluginConfiguration) : base(pluginInterface, pluginConfiguration) { }
+        public SummonerHudWindow(
+            ClientState clientState,
+            DalamudPluginInterface pluginInterface,
+            DataManager dataManager,
+            Framework framework,
+            GameGui gameGui,
+            JobGauges jobGauges,
+            ObjectTable objectTable, 
+            PluginConfiguration pluginConfiguration,
+            TargetManager targetManager,
+            UiBuilder uiBuilder
+        ) : base(
+            clientState,
+            pluginInterface,
+            dataManager,
+            framework,
+            gameGui,
+            jobGauges,
+            objectTable,
+            pluginConfiguration,
+            targetManager,
+            uiBuilder
+        ) { }
 
         protected override void Draw(bool _)
         {
@@ -42,29 +70,28 @@ namespace DelvUI.Interface
             DrawAetherBar();
         }
 
-        protected override void DrawPrimaryResourceBar()
-        {
+        protected override void DrawPrimaryResourceBar() {
         }
 
-        private void DrawActiveDots()
-        {
-            var target = PluginInterface.ClientState.Targets.SoftTarget ?? PluginInterface.ClientState.Targets.CurrentTarget;
+        private void DrawActiveDots() {
+            var actor = TargetManager.SoftTarget ?? TargetManager.Target;
 
-            if (!(target is Chara))
-            {
+            if (actor is not BattleChara target) {
                 return;
             }
 
             var xPadding = 2;
             var barWidth = (SmnDotBarWidth / 2) - 1;
-            var miasma = target.StatusEffects.FirstOrDefault(o => o.EffectId == 1215 && o.OwnerId == PluginInterface.ClientState.LocalPlayer.ActorId ||
-                                                                  o.EffectId == 180 && o.OwnerId == PluginInterface.ClientState.LocalPlayer.ActorId);
-            var bio = target.StatusEffects.FirstOrDefault(o => o.EffectId == 1214 && o.OwnerId == PluginInterface.ClientState.LocalPlayer.ActorId ||
-                                                               o.EffectId == 179 && o.OwnerId == PluginInterface.ClientState.LocalPlayer.ActorId ||
-                                                               o.EffectId == 189 && o.OwnerId == PluginInterface.ClientState.LocalPlayer.ActorId);
+            
+            Debug.Assert(ClientState.LocalPlayer != null, "ClientState.LocalPlayer != null");
+            var miasma = target.StatusList.FirstOrDefault(o => o.StatusId == 1215 && o.SourceID == ClientState.LocalPlayer.ObjectId ||
+                                                                  o.StatusId == 180 && o.SourceID == ClientState.LocalPlayer.ObjectId);
+            var bio = target.StatusList.FirstOrDefault(o => o.StatusId == 1214 && o.SourceID == ClientState.LocalPlayer.ObjectId ||
+                                                               o.StatusId == 179 && o.SourceID == ClientState.LocalPlayer.ObjectId ||
+                                                               o.StatusId == 189 && o.SourceID == ClientState.LocalPlayer.ObjectId);
 
-            var miasmaDuration = miasma.Duration;
-            var bioDuration = bio.Duration;
+            var miasmaDuration = miasma?.RemainingTime ?? 0f;
+            var bioDuration = bio?.RemainingTime ?? 0f;
 
             var miasmaColor = miasmaDuration > 5 ? SmnMiasmaColor["base"] : SmnExpiryColor["base"];
             var bioColor = bioDuration > 5 ? SmnBioColor["base"] : SmnExpiryColor["base"];
@@ -86,10 +113,10 @@ namespace DelvUI.Interface
             drawList.AddRectFilled(cursorPos, cursorPos + new Vector2((barSize.X / 30) * bioDuration, barSize.Y), bioColor);
             drawList.AddRect(cursorPos, cursorPos + barSize, 0xFF000000);
         }
-        private void DrawAetherBar()
-        {
-            Debug.Assert(PluginInterface.ClientState.LocalPlayer != null, "PluginInterface.ClientState.LocalPlayer != null");
-            var aetherFlowBuff = PluginInterface.ClientState.LocalPlayer.StatusEffects.FirstOrDefault(o => o.EffectId == 304);
+        
+        private void DrawAetherBar() {
+            Debug.Assert(ClientState.LocalPlayer != null, "ClientState.LocalPlayer != null");
+            var aetherFlowBuff = ClientState.LocalPlayer.StatusList.FirstOrDefault(o => o.StatusId == 304);
             var xPadding = 2;
             var barWidth = (SmnAetherBarWidth / 2) - 1;
             var cursorPos = new Vector2(CenterX - 127, CenterY + SmnAetherBarY - 22);
@@ -104,8 +131,8 @@ namespace DelvUI.Interface
             drawList.AddRect(cursorPos, cursorPos + barSize, 0xFF000000);
             cursorPos = new Vector2(CenterX - 127, CenterY + SmnAetherBarY - 22);
 
-            switch (aetherFlowBuff.StackCount)
-            {
+            var stackCount = aetherFlowBuff?.StackCount ?? 0;
+            switch (stackCount) {
                 case 1:
                     drawList.AddRectFilled(cursorPos, cursorPos + barSize, SmnAetherColor["base"]);
                     drawList.AddRect(cursorPos, cursorPos + barSize, 0xFF000000);
@@ -120,13 +147,12 @@ namespace DelvUI.Interface
                     break;
 
             }
-
         }
-        private void DrawRuinBar()
-        {
-            Debug.Assert(PluginInterface.ClientState.LocalPlayer != null, "PluginInterface.ClientState.LocalPlayer != null");
-            var ruinBuff = PluginInterface.ClientState.LocalPlayer.StatusEffects.FirstOrDefault(o => o.EffectId == 1212);
-            var ruinStacks = ruinBuff.StackCount;
+        
+        private void DrawRuinBar() {
+            Debug.Assert(ClientState.LocalPlayer != null, "ClientState.LocalPlayer != null");
+            var ruinBuff = ClientState.LocalPlayer.StatusList.FirstOrDefault(o => o.StatusId == 1212);
+            var ruinStacks = ruinBuff?.StackCount ?? 0;
 
             const int xPadding = 2;
             var barWidth = (SmnRuinBarWidth - xPadding * 3) / 4;
@@ -138,16 +164,10 @@ namespace DelvUI.Interface
             var emptyColor = SmnEmptyColor["base"];
 
             var drawList = ImGui.GetWindowDrawList();
-            for (var i = 0; i <= 4 - 1; i++)
-            {
+            for (var i = 0; i <= 4 - 1; i++) {
                 drawList.AddRectFilled(cursorPos, cursorPos + barSize, emptyColor);
-                if (ruinStacks > i)
-                {
+                if (ruinStacks > i) {
                     drawList.AddRectFilled(cursorPos, cursorPos + new Vector2(barSize.X, barSize.Y), barColor);
-                }
-                else
-                {
-
                 }
                 drawList.AddRect(cursorPos, cursorPos + barSize, 0xFF000000);
                 cursorPos = new Vector2(cursorPos.X + barWidth + xPadding, cursorPos.Y);

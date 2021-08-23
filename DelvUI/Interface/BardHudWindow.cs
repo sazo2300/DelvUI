@@ -1,7 +1,15 @@
 ﻿using System.Linq;
 using System.Numerics;
-using Dalamud.Game.ClientState.Actors.Types;
-using Dalamud.Game.ClientState.Structs.JobGauge;
+using Dalamud.Data;
+using Dalamud.Game;
+using Dalamud.Game.ClientState;
+using Dalamud.Game.ClientState.JobGauge;
+using Dalamud.Game.ClientState.JobGauge.Enums;
+using Dalamud.Game.ClientState.JobGauge.Types;
+using Dalamud.Game.ClientState.Objects;
+using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Game.Gui;
+using Dalamud.Interface;
 using Dalamud.Plugin;
 using ImGuiNET;
 
@@ -15,7 +23,29 @@ namespace DelvUI.Interface {
         private new static int XOffset => 127;
         private new static int YOffset => 440;
         
-        public BardHudWindow(DalamudPluginInterface pluginInterface, PluginConfiguration pluginConfiguration) : base(pluginInterface, pluginConfiguration) { }
+        public BardHudWindow(
+            ClientState clientState,
+            DalamudPluginInterface pluginInterface,
+            DataManager dataManager,
+            Framework framework,
+            GameGui gameGui,
+            JobGauges jobGauges,
+            ObjectTable objectTable, 
+            PluginConfiguration pluginConfiguration,
+            TargetManager targetManager,
+            UiBuilder uiBuilder
+        ) : base(
+            clientState,
+            pluginInterface,
+            dataManager,
+            framework,
+            gameGui,
+            jobGauges,
+            objectTable,
+            pluginConfiguration,
+            targetManager,
+            uiBuilder
+        ) { }
 
         protected override void Draw(bool _) {
             DrawActiveDots();
@@ -29,20 +59,20 @@ namespace DelvUI.Interface {
 
         private void DrawActiveDots()
         {
-            var target = PluginInterface.ClientState.Targets.SoftTarget ?? PluginInterface.ClientState.Targets.CurrentTarget;
+            var target = TargetManager.SoftTarget ?? TargetManager.Target;
 
-            if (!(target is Chara)) {
+            if (target is not BattleChara actor) {
                 return;
             }
             
             var expiryColor = 0xFF2E2EC7;
             var xPadding = 2;
             var barWidth = (BarWidth / 2) - 1;
-            var cb = target.StatusEffects.FirstOrDefault(o => o.EffectId == 1200 || o.EffectId == 124);
-            var sb = target.StatusEffects.FirstOrDefault(o => o.EffectId == 1201 || o.EffectId == 129);
-            
-            var cbDuration = cb.Duration;
-            var sbDuration = sb.Duration;
+            var cb = actor.StatusList.FirstOrDefault(o => o.StatusId is 1200 or 124);
+            var sb = actor.StatusList.FirstOrDefault(o => o.StatusId is 1201 or 129);
+
+            var cbDuration = cb?.RemainingTime ?? 0f;
+            var sbDuration = sb?.RemainingTime ?? 0f;
 
             var cbColor = cbDuration > 5 ? 0xFFEB44B6 : expiryColor;
             var sbColor = sbDuration > 5 ? 0xFFCA7548 : expiryColor;
@@ -75,26 +105,26 @@ namespace DelvUI.Interface {
         }
 
         private void HandleCurrentSong() {
-            var gauge = PluginInterface.ClientState.JobGauges.Get<BRDGauge>();
-            var songStacks = gauge.NumSongStacks;
-            var song = gauge.ActiveSong;
+            var gauge = JobGauges.Get<BRDGauge>();
+            var songStacks = gauge.Repertoire;
+            var song = gauge.Song;
             var songTimer = gauge.SongTimer;
             
             switch (song)
             {
-                case CurrentSong.WANDERER:
+                case Song.WANDERER:
                     DrawStacks(songStacks, 3, 0xFFE8D796);
                     DrawSongTimer(songTimer, 0xFF5CD15C);
                     break;
-                case CurrentSong.MAGE:
+                case Song.MAGE:
                     DrawSongTimer(songTimer, 0xFF8F5A8F);
                     DrawBloodletterReady();
                     break;
-                case CurrentSong.ARMY:
+                case Song.ARMY:
                     DrawStacks(songStacks, 4, 0xFFB1DE00);
                     DrawSongTimer(songTimer, 0xFF34CDCF);
                     break;
-                case CurrentSong.NONE:
+                case Song.NONE:
                     DrawSongTimer(0, 0x88000000);
                     break;
                 default:
@@ -127,7 +157,7 @@ namespace DelvUI.Interface {
         }
 
         private void DrawSoulVoiceBar() {
-            var soulVoice = PluginInterface.ClientState.JobGauges.Get<BRDGauge>().SoulVoiceValue;
+            var soulVoice = JobGauges.Get<BRDGauge>().SoulVoice;
             const uint soulVoiceColor = 0xFF00E3F8;
 
             var barSize = new Vector2(BarWidth, BarHeight);
