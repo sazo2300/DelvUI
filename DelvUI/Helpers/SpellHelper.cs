@@ -1,11 +1,37 @@
-﻿using System;
-using Dalamud.Plugin;
-using FFXIVClientStructs.FFXIV.Client.Game;
+﻿using FFXIVClientStructs.FFXIV.Client.Game;
+using System;
 
 namespace DelvUI.Helpers
 {
-    class SpellHelper
+    internal class SpellHelper
     {
+        #region Singleton
+        private static Lazy<SpellHelper> _lazyInstance = new Lazy<SpellHelper>(() => new SpellHelper());
+
+        public static SpellHelper Instance => _lazyInstance.Value;
+
+        ~SpellHelper()
+        {
+            Dispose(false);
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected void Dispose(bool disposing)
+        {
+            if (!disposing)
+            {
+                return;
+            }
+
+            _lazyInstance = new Lazy<SpellHelper>(() => new SpellHelper());
+        }
+        #endregion
+
         private readonly unsafe ActionManager* _actionManager;
 
         public unsafe SpellHelper()
@@ -13,50 +39,31 @@ namespace DelvUI.Helpers
             _actionManager = ActionManager.Instance();
         }
 
-        public unsafe uint GetSpellActionId(uint ActionID)
+        public unsafe uint GetSpellActionId(uint actionId) => _actionManager->GetAdjustedActionId(actionId);
+
+        public unsafe float GetRecastTimeElapsed(uint actionId) => _actionManager->GetRecastTimeElapsed(ActionType.Spell, GetSpellActionId(actionId));
+
+        public unsafe float GetRecastTime(uint actionId) => _actionManager->GetRecastTime(ActionType.Spell, GetSpellActionId(actionId));
+
+        public float GetSpellCooldown(uint actionId) => Math.Abs(GetRecastTime(GetSpellActionId(actionId)) - GetRecastTimeElapsed(GetSpellActionId(actionId)));
+
+        public int GetSpellCooldownInt(uint actionId)
         {
-            return _actionManager->GetAdjustedActionId(ActionID);
+            int cooldown = (int)Math.Ceiling(GetSpellCooldown(actionId) % GetRecastTime(actionId));
+            return Math.Max(0, cooldown);
         }
 
-        public unsafe float GetRecastTimeElapsed(uint ActionID)
+        public int GetStackCount(int maxStacks, uint actionId)
         {
-            return _actionManager->GetRecastTimeElapsed(ActionType.Spell, GetSpellActionId(ActionID));
-        }
+            int cooldown = GetSpellCooldownInt(actionId);
+            float recastTime = GetRecastTime(actionId);
 
-        public unsafe float GetRecastTime(uint ActionID)
-        {
-            return _actionManager->GetRecastTime(ActionType.Spell, GetSpellActionId(ActionID));
-        }
-
-        public float GetSpellCooldown(uint ActionID)
-        {
-            return Math.Abs(GetRecastTime(GetSpellActionId(ActionID)) - GetRecastTimeElapsed(GetSpellActionId(ActionID)));
-        }
-
-        public int GetSpellCooldownInt(uint ActionID)
-        {
-            if ((int) Math.Ceiling(GetSpellCooldown(ActionID) % GetRecastTime(ActionID)) <= 0)
-            {
-                return 0;
-            }
-
-            return (int)Math.Ceiling(GetSpellCooldown(ActionID) % GetRecastTime(ActionID));
-        }
-
-        public int GetStackCount(int maxStacks, uint ActionID)
-        {
-            if (GetSpellCooldownInt(ActionID) == 0 || GetSpellCooldownInt(ActionID) < 0)
+            if (cooldown <= 0 || recastTime == 0)
             {
                 return maxStacks;
             }
 
-            return maxStacks - (int)Math.Ceiling(GetSpellCooldownInt(ActionID) / (GetRecastTime(ActionID) / maxStacks));
+            return maxStacks - (int)Math.Ceiling(cooldown / (recastTime / maxStacks));
         }
-
-        /*public unsafe uint CheckActionResources(uint ActionID)
-        {
-            return _actionManager->CheckActionResources(ActionType.Spell, ActionID);
-        }*/
-
     }
 }
